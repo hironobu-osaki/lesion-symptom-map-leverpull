@@ -3448,7 +3448,7 @@ uicontrol(figCent, 'Style','popupmenu', 'String', metricNames, ...
 % selected lesion outlines over the brain map, no scatter/heatmap clutter)
 % so the red contours are easy to see; Off restores the normal view.
 uicontrol(figCent, 'Style','popupmenu', 'String',{'Circle','Line'}, ...
-    'Value',1, 'Units','normalized', 'Position',[0.560 0.047 0.072 0.036], ...
+    'Value',2, 'Units','normalized', 'Position',[0.560 0.047 0.072 0.036], ...
     'FontSize',9, 'Tag','popCentShape', ...
     'TooltipString',['Selection shape. Circle: click one centre; In/Out are the ' ...
         'inner/outer DIAMETERS (µm). Line: click two endpoints; In/Out are the ' ...
@@ -3457,7 +3457,7 @@ uicontrol(figCent, 'Style','popupmenu', 'String',{'Circle','Line'}, ...
 uicontrol(figCent, 'Style','text', 'String','In:', ...
     'Units','normalized', 'Position',[0.636 0.050 0.024 0.03], ...
     'FontSize',9, 'HorizontalAlignment','left', 'BackgroundColor',bg);
-uicontrol(figCent, 'Style','edit', 'String','300', ...
+uicontrol(figCent, 'Style','edit', 'String','100', ...
     'Units','normalized', 'Position',[0.660 0.047 0.040 0.036], ...
     'FontSize',9, 'Tag','edCentDiam', ...
     'BackgroundColor',[1 1 1], ...
@@ -3466,7 +3466,7 @@ uicontrol(figCent, 'Style','edit', 'String','300', ...
 uicontrol(figCent, 'Style','text', 'String','Out:', ...
     'Units','normalized', 'Position',[0.702 0.050 0.030 0.03], ...
     'FontSize',9, 'HorizontalAlignment','left', 'BackgroundColor',bg);
-uicontrol(figCent, 'Style','edit', 'String','600', ...
+uicontrol(figCent, 'Style','edit', 'String','800', ...
     'Units','normalized', 'Position',[0.732 0.047 0.040 0.036], ...
     'FontSize',9, 'Tag','edSurDiam', ...
     'BackgroundColor',[1 1 1], ...
@@ -4785,6 +4785,25 @@ setappdata(figNew, 'srcFigCent', figCent);
 drawPopulationFigure(BehData, figNew, StdPOD, {}, [], false, [], 'original', ...
     infMask, filterStr, surMask, 'Surround');
 
+% Volume-match check: confirm the Region and Surround groups don't differ in
+% total per-animal lesion volume, so a deficit difference between them can't
+% just be a lesion-size confound. Appended to the population figure's own
+% title (not a separate figure) so it travels with "Apply marks to plot".
+if hasSurround && any(surMask)
+    [volStr, volReg, volSur] = lesionVolumeCompareStr(S, selIDs, 'Region', surIDs, 'Surround');
+    line1 = getappdata(figNew, 'popTitleLine1');
+    if ~isempty(line1)
+        setappdata(figNew, 'popTitleLine1', sprintf('%s\n%s', line1, volStr));
+        popStats = getappdata(figNew, 'popStats');
+        spec     = getappdata(figNew, 'popMarkSpec');
+        if ~isempty(popStats) && ~isempty(spec)
+            setPopMarkTitle(figNew, spec, popStats.k_holm);
+        end
+    end
+    fprintf('%s\n', volStr);
+    openLesionVolumeHistFigure(volReg, 'Region', volSur, 'Surround', volStr);
+end
+
 % "Lesion map" companion button (shows both sets via the contour view).
 setappdata(figNew, 'BehData',      BehData);
 setappdata(figNew, 'CCF_root_beh', ccfRoot);
@@ -4818,6 +4837,86 @@ else
 end
 n = [-u(2), u(1)];               % unit normal
 poly = [p1 + n*half; p2 + n*half; p2 - n*half; p1 - n*half];
+end
+
+function [str, volA, volB] = lesionVolumeCompareStr(S, idsA, labelA, idsB, labelB)
+% Wilcoxon rank-sum comparison of TOTAL per-animal lesion volume (mm³,
+% summed across all of that animal's sub-lesions in the centroid data S)
+% between two animal-ID lists — e.g. the Region vs Surround groups from
+% "Select region". Used to confirm the two groups are volume-matched before
+% attributing a behavioral difference between them to lesion location rather
+% than lesion size. Also returns the per-animal volume vectors (volA, volB)
+% so the caller can plot them (e.g. the volume-match histogram).
+volA = animalTotalLesionVol(S, idsA);
+volB = animalTotalLesionVol(S, idsB);
+if numel(volA) >= 2 && numel(volB) >= 2
+    p = ranksum(volA, volB);
+    pStr = sprintf('p=%.3f (ranksum)', p);
+else
+    pStr = 'p=n/a (n<2)';
+end
+sdA = 0;  if numel(volA) >= 2, sdA = std(volA); end
+sdB = 0;  if numel(volB) >= 2, sdB = std(volB); end
+str = sprintf(['Volume match check — %s %.3f\x00B1%.3f mm³ (n=%d) vs %s ' ...
+               '%.3f\x00B1%.3f mm³ (n=%d): %s'], ...
+    labelA, mean(volA), sdA, numel(volA), labelB, mean(volB), sdB, numel(volB), pStr);
+end
+
+function figHist = openLesionVolumeHistFigure(volA, labelA, volB, labelB, volStr)
+% Bar graph (mean +/- SEM) of per-animal total lesion volume for the two
+% "Select region" groups (Region vs Surround), with every animal's own
+% volume overlaid as a jittered dot — the visual companion to the
+% volume-match check in lesionVolumeCompareStr. Colors match Region=red /
+% Surround=blue used throughout the Region+Surround time-course figure
+% (cInf/cOvl there).
+cA = [0.85, 0.15, 0.15];   % Region
+cB = [0.00, 0.35, 0.85];   % Surround
+figHist = figure('Name', sprintf('Lesion volume — %s vs %s', labelA, labelB), ...
+    'Position', [900 850 480 420]);
+ax = axes('Parent', figHist);
+hold(ax, 'on');
+if isempty(volA) && isempty(volB)
+    text(ax, 0.5, 0.5, 'No lesion volumes to show', 'Units','normalized', ...
+        'HorizontalAlignment','center', 'FontSize', 11);
+    axis(ax, 'off');
+    return
+end
+
+groups = {volA(:), volB(:)};
+colors = {cA, cB};
+JITTER = 0.12;
+for g = 1:2
+    v = groups{g};
+    n = numel(v);
+    if n > 0
+        mu = mean(v);
+        bar(ax, g, mu, 0.6, 'FaceColor', colors{g}, 'FaceAlpha', 0.35, ...
+            'EdgeColor', colors{g}, 'LineWidth', 1.5);
+        if n > 1
+            sem = std(v) / sqrt(n);
+            errorbar(ax, g, mu, sem, 'Color', 'k', 'LineWidth', 1.2, ...
+                'CapSize', 10, 'LineStyle', 'none');
+        end
+        jitterX = g + (rand(n,1) - 0.5) * 2 * JITTER;
+        scatter(ax, jitterX, v, 45, colors{g}, 'filled', ...
+            'MarkerEdgeColor', 'k', 'MarkerFaceAlpha', 0.85);
+    end
+end
+set(ax, 'XTick', [1 2], 'XTickLabel', ...
+    {sprintf('%s (n=%d)', labelA, numel(volA)), sprintf('%s (n=%d)', labelB, numel(volB))});
+xlim(ax, [0.4 2.6]);
+ylabel(ax, 'Total lesion volume per animal (mm³)');
+set(ax, 'TickDir','out', 'Box','off');
+title(ax, volStr, 'FontSize', 9, 'Interpreter','none');
+end
+
+function v = animalTotalLesionVol(S, ids)
+% Sum of S.vol (per sub-lesion, mm³) across all sub-lesions belonging to
+% each animal ID in `ids`, one total per animal.
+v = zeros(1, numel(ids));
+for k = 1:numel(ids)
+    v(k) = sum(S.vol(strcmp(S.ids, ids{k})));
+end
 end
 
 function resetSelToggle(hTgl)
