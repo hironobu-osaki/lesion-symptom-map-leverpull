@@ -14,3 +14,7 @@ Thumbs.db
 *.exe
 .claude/
 conversation_exports/
+
+# lab-internal notes (Japanese), not part of the release
+使用方法.txt
+要変更箇所.txt
