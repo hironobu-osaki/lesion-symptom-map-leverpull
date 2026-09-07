@@ -1,0 +1,14 @@
+１．データを保存するフォルダの構造について
+・解析したい切片画像が含まれるフォルダ（menu: File selection->>set raw image pathで指定）
+　slice_1.png, slice_2.png...などのように通し番号で保存されている必要があります。
+　拡張子は.pngでも.tifでも.jpegでもOKです。
+・解析後のデータを保存するフォルダ（menu: File selection->>set processing save pathで指定）
+  ここにはslice_1.pngをコピー＆tif変換したファイルがまず保存されます。
+　私は通常、Raw image pathの下層にCCFというフォルダを作成して、そこを指定しています。
+　（画像コピー＆tif変換は、menu: Image preprocessing->> Create slice imagesで行われます）
+
+２．menu: Image preprocessing->> Create slice images
+
+
+
+

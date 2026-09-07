@@ -1,0 +1,16 @@
+# machine-specific configuration
+local_paths.m
+
+# Allen CCF atlas volumes (download separately, see README)
+*.npy
+
+# MATLAB / Python / OS clutter
+*.asv
+*.mex*
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+*.exe
+.claude/
+conversation_exports/

@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the accompanying paper (details will be added on publication)."
+title: "lesion-symptom-map-leverpull"
+type: software
+license: GPL-3.0
+repository-code: "https://github.com/hironobu-osaki/lesion-symptom-map-leverpull"
+authors:
+  - family-names: Osaki
+    given-names: Hironobu
+    affiliation: "Graduate School of Brain Science, Doshisha University"
+  - family-names: Nakashima
+    given-names: Daisuke
+    affiliation: "Graduate School of Brain Science, Doshisha University"
+  - family-names: Iwai
+    given-names: Sachiko
+    affiliation: "Graduate School of Brain Science, Doshisha University"
+  - family-names: Masamizu
+    given-names: Yoshito
+    affiliation: "Graduate School of Brain Science, Doshisha University"
