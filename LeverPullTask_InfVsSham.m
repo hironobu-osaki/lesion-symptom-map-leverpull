@@ -3523,16 +3523,19 @@ uicontrol(figCent, 'Style','edit', 'String','0.05', ...
         'into candidate clusters. The reported cluster p is corrected.']);
 
 % Live update while dragging (plus the standard on-release callback). Min/Max
-% size additionally refresh the linked Region+Surround companion figures, but
-% only on release/Callback — not on every drag tick — since that redraw runs
-% drawPopulationFigure's full stats (ANOVA/LME) and would make dragging laggy.
+% size additionally refresh the linked Region+Surround companion figures.
+% The time-course figure's redraw runs drawPopulationFigure's full stats
+% (ANOVA/LME), so that one stays release-only (onCentSizeChange) to keep
+% dragging from getting laggy. The lesion-volume bar chart is cheap by
+% comparison (one bar/errorbar/scatter, no stats) so it refreshes on every
+% drag tick too (onCentSizeChangeLive), matching the scatter view.
 for hh = [hSz hAl]
     set(hh, 'Callback', @(~,~) redrawCentroidScatter(figCent));
     addlistener(hh, 'ContinuousValueChange', @(~,~) redrawCentroidScatter(figCent));
 end
 for hh = [hMn hMx]
     set(hh, 'Callback', @(~,~) onCentSizeChange(figCent));
-    addlistener(hh, 'ContinuousValueChange', @(~,~) redrawCentroidScatter(figCent));
+    addlistener(hh, 'ContinuousValueChange', @(~,~) onCentSizeChangeLive(figCent));
 end
 
 % Custom datatip: show centroid position as mm from bregma (AP, LR) instead
@@ -4532,6 +4535,71 @@ refreshRegionSelectionLive(figCent);
 redrawCentroidScatter(figCent);
 end
 
+function onCentSizeChangeLive(figCent)
+% Min/Max size sliders, on every drag tick: normal scatter redraw, plus a
+% live refresh of just the (cheap) linked lesion-volume bar chart. See
+% refreshRegionSelectionLive for the release-only refresh that also updates
+% the linked time-course figure (too expensive — full ANOVA/LME — to re-run
+% on every tick).
+refreshRegionVolumeLive(figCent);
+redrawCentroidScatter(figCent);
+end
+
+function [ok, S, selIDs, surIDs, vLo, vHi, volReg, volSur, volStr] = regionVolumeState(figCent)
+% Shared by refreshRegionSelectionLive (on release) and refreshRegionVolumeLive
+% (every drag tick): current Min/Max range, the Region/Surround GROUP
+% MEMBERSHIP fixed by the original "Select region" click (sel.selIDs /
+% sel.surIDs) — never changes afterward — and each member's total lesion
+% volume against the CURRENT range, plus the resulting volume-match string.
+% ok=false (toggle Off / nothing selected / no data) means both callers
+% should no-op.
+ok = false;  S = [];  selIDs = {};  surIDs = {};
+vLo = -inf;  vHi = inf;  volReg = [];  volSur = [];  volStr = '';
+hTgl = findobj(figCent, 'Tag','tglCentSelReg');
+if isempty(hTgl) || ~logical(get(hTgl(1),'Value')), return; end
+sel = getappdata(figCent, 'centRegionSel');
+if isempty(sel) || ~isfield(sel,'inSel'), return; end
+S = getappdata(figCent, 'centData');
+if isempty(S), return; end
+
+hMn = findobj(figCent, 'Tag','sldCentMinVol');
+hMx = findobj(figCent, 'Tag','sldCentMaxVol');
+if ~isempty(hMn), vLo = get(hMn(1),'Value'); end
+if ~isempty(hMx), vHi = get(hMx(1),'Value'); end
+if vLo > vHi, tmp = vLo;  vLo = vHi;  vHi = tmp; end
+
+% Derived from sel.inSel/inSur (present since the very first "Select
+% region" implementation) rather than sel.selIDs/surIDs, so this keeps
+% working even against a selection made before selIDs/surIDs started being
+% stored — an already-open Lesion Centroids figure from an older session
+% would otherwise silently no-op here on every slider move.
+if isfield(sel,'selIDs') && isfield(sel,'surIDs')
+    selIDs = sel.selIDs;  surIDs = sel.surIDs;
+else
+    selIDs = unique(S.ids(sel.inSel));
+    surIDs = unique(S.ids(sel.inSur));
+end
+volReg = animalTotalLesionVol(S, selIDs);
+volSur = animalTotalLesionVol(S, surIDs);
+if sel.hasSurround && ~isempty(surIDs)
+    volStr = lesionVolumeCompareStr(S, selIDs, 'Region', surIDs, 'Surround', vLo, vHi);
+end
+ok = true;
+end
+
+function refreshRegionVolumeLive(figCent)
+% Cheap half of refreshRegionSelectionLive, safe to call on every Min/Max
+% slider drag tick: redraws only the linked lesion-volume bar chart against
+% the current range. Does not touch the linked time-course figure (see
+% refreshRegionSelectionLive for that, on release only).
+[ok, ~, ~, ~, vLo, vHi, volReg, volSur, volStr] = regionVolumeState(figCent);
+if ~ok, return; end
+figHist = getappdata(figCent, 'centLinkedVolFig');
+if ~isempty(figHist) && isgraphics(figHist, 'figure') && ~isempty(volStr)
+    drawLesionVolumeBarPlot(figHist, volReg, 'Region', volSur, 'Surround', volStr, vLo, vHi);
+end
+end
+
 function refreshRegionSelectionLive(figCent)
 % Called when the Min/Max size sliders change (on release). The Region and
 % Surround GROUP MEMBERSHIP is fixed by the original click (sel.selIDs /
@@ -4544,33 +4612,15 @@ function refreshRegionSelectionLive(figCent)
 % out-of-range ones as open circles (drawLesionVolumeBarPlot) — so moving
 % the sliders never makes a point disappear, only recolors it and updates
 % the group median. A no-op when the toggle is Off or nothing is selected.
-hTgl = findobj(figCent, 'Tag','tglCentSelReg');
-if isempty(hTgl) || ~logical(get(hTgl(1),'Value')), return; end
-sel = getappdata(figCent, 'centRegionSel');
-if isempty(sel) || ~isfield(sel,'selIDs'), return; end
-S       = getappdata(figCent, 'centData');
+[ok, S, selIDs, surIDs, vLo, vHi, volReg, volSur, volStr] = regionVolumeState(figCent);
+if ~ok, return; end
 BehData = getappdata(figCent, 'BehData');
-if isempty(S) || isempty(BehData), return; end
+if isempty(BehData), return; end
 
-hMn = findobj(figCent, 'Tag','sldCentMinVol');
-hMx = findobj(figCent, 'Tag','sldCentMaxVol');
-vLo = -inf;  vHi = inf;
-if ~isempty(hMn), vLo = get(hMn(1),'Value'); end
-if ~isempty(hMx), vHi = get(hMx(1),'Value'); end
-if vLo > vHi, tmp = vLo;  vLo = vHi;  vHi = tmp; end
-
-selIDs = sel.selIDs;  surIDs = sel.surIDs;
-volReg = animalTotalLesionVol(S, selIDs);
-volSur = animalTotalLesionVol(S, surIDs);
 regInThr = volReg >= vLo & volReg <= vHi;
 surInThr = volSur >= vLo & volSur <= vHi;
 infMask = strcmp({BehData.Group}, 'Infarction') & ismember({BehData.ID}, selIDs(regInThr));
 surMask = strcmp({BehData.Group}, 'Infarction') & ismember({BehData.ID}, surIDs(surInThr));
-
-volStr = '';
-if sel.hasSurround && ~isempty(surIDs)
-    volStr = lesionVolumeCompareStr(S, selIDs, 'Region', surIDs, 'Surround', vLo, vHi);
-end
 
 figNew = getappdata(figCent, 'centLinkedTCFig');
 if ~isempty(figNew) && isgraphics(figNew, 'figure')
@@ -5024,12 +5074,12 @@ end
 
 function drawLesionVolumeBarPlot(figHist, volA, labelA, volB, labelB, volStr, vLo, vHi)
 % (Re)draws the Region vs Surround lesion-volume panel into figHist in
-% place (no new figure): one bar per group at the MEDIAN (IQR whiskers) of
+% place (no new figure): one bar per group at the MEAN (whiskers = ±SD) of
 % that group's animals currently inside the Lesion Centroids Min/Max size
 % range [vLo, vHi], every animal's own total lesion volume overlaid as a
 % jittered dot — filled when inside that range, open (hollow) when outside
 % it, so moving the Min/Max sliders after "Select region" visibly
-% excludes/restores points and updates the median/whiskers without needing
+% excludes/restores points and updates the mean/whiskers without needing
 % a new figure. Colors match Region=red / Surround=blue used throughout the
 % Region+Surround time-course figure (cInf/cOvl there).
 if nargin < 7 || isempty(vLo), vLo = -inf; end
@@ -5063,14 +5113,12 @@ for g = 1:2
     inThr = v >= vLo & v <= vHi;
     if any(inThr)
         vThr = v(inThr);
-        med  = median(vThr);
-        bar(ax, g, med, 0.6, 'FaceColor', colors{g}, 'FaceAlpha', 0.35, ...
+        mu   = mean(vThr);
+        bar(ax, g, mu, 0.6, 'FaceColor', colors{g}, 'FaceAlpha', 0.35, ...
             'EdgeColor', colors{g}, 'LineWidth', 1.5);
         if numel(vThr) > 1
-            % IQR whiskers (25th/75th percentile) around the median, matching
-            % the nonparametric (rank-sum) stat this figure otherwise reports.
-            q = prctile(vThr, [25 75]);
-            errorbar(ax, g, med, med - q(1), q(2) - med, 'Color', 'k', ...
+            sd = std(vThr);
+            errorbar(ax, g, mu, sd, sd, 'Color', 'k', ...
                 'LineWidth', 1.2, 'CapSize', 10, 'LineStyle', 'none');
         end
     end
@@ -5089,7 +5137,7 @@ set(ax, 'XTick', [1 2], 'XTickLabel', ...
 xlim(ax, [0.4 2.6]);
 ylabel(ax, 'Total lesion volume per animal (mm³)');
 set(ax, 'TickDir','out', 'Box','off');
-title(ax, {volStr, ['bar = median (whiskers = IQR) of filled (in Min/Max range) ' ...
+title(ax, {volStr, ['bar = mean (whiskers = ±SD) of filled (in Min/Max range) ' ...
     'points; open circles = outside range']}, 'FontSize', 9, 'Interpreter','none');
 end
 
