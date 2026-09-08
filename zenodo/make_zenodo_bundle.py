@@ -7,7 +7,8 @@ Gathers, for every animal listed in NOIO_summary_YYYYMMDD.xlsx:
                                             lesion registered to Allen CCFv3
   behavior/*_FallCount.mat                  per-session forelimb metrics (output of GenerateFallCount.py)
   behavior/*_corrections.mat                manual curation applied to the session by the analysis script
-  behavior/lvm/*.lvm.gz                     LabVIEW lever / reward / camera-trigger record (gzip of the raw file)
+  behavior/lvm/*.lvm.gz                     LabVIEW lever / reward / camera-trigger record (gzip of the raw file);
+                                            omitted with --no-lvm (the 2026 submission record excludes them)
 plus the two FallCount_customCategories.mat files, the summary spreadsheet, a
 manifest.csv and SHA-256 checksums. The layout mirrors what
 LeverPullTask_InfVsSham.m expects once local_paths.m points at the bundle.
@@ -108,6 +109,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-checksums", action="store_true")
     ap.add_argument("--trust-existing-gz", action="store_true", help="skip .lvm.gz files that already exist (after a completed run)")
+    ap.add_argument("--no-lvm", action="store_true", help="do not include the LabVIEW .lvm records (2026 submission: excluded)")
     a = ap.parse_args()
     share, out, dry = a.share, a.out, a.dry_run
     dapi_root = os.path.join(share, a.dapi)
@@ -157,14 +159,14 @@ def main():
             log(f"  !! no Movie/Iwai folder for {animal}")
 
         # behavior: lvm (gzip), any depth except duplicate working folders
-        bdir = find_behavior_dir(share, animal)
+        bdir = None if a.no_lvm else find_behavior_dir(share, animal)
         if bdir:
             for src in sorted(glob.glob(os.path.join(bdir, "**", "*.lvm"), recursive=True)):
                 if any(tok in src for tok in SKIP_DIR_TOKENS):
                     continue
                 rec["bytes"] += gzip_to(src, os.path.join(adir, "behavior", "lvm", os.path.basename(src) + ".gz"), dry, log, a.trust_existing_gz)
                 rec["n_lvm"] += 1
-        else:
+        elif not a.no_lvm:
             log(f"  !! no Behavior folder for {animal}")
         rows.append(rec)
 
