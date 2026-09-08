@@ -3522,9 +3522,16 @@ uicontrol(figCent, 'Style','edit', 'String','0.05', ...
         'a significance level: it only decides which pixels get grouped ' ...
         'into candidate clusters. The reported cluster p is corrected.']);
 
-% Live update while dragging (plus the standard on-release callback)
-for hh = [hSz hAl hMn hMx]
+% Live update while dragging (plus the standard on-release callback). Min/Max
+% size additionally refresh the linked Region+Surround companion figures, but
+% only on release/Callback — not on every drag tick — since that redraw runs
+% drawPopulationFigure's full stats (ANOVA/LME) and would make dragging laggy.
+for hh = [hSz hAl]
     set(hh, 'Callback', @(~,~) redrawCentroidScatter(figCent));
+    addlistener(hh, 'ContinuousValueChange', @(~,~) redrawCentroidScatter(figCent));
+end
+for hh = [hMn hMx]
+    set(hh, 'Callback', @(~,~) onCentSizeChange(figCent));
     addlistener(hh, 'ContinuousValueChange', @(~,~) redrawCentroidScatter(figCent));
 end
 
@@ -4499,7 +4506,7 @@ end
 function onCentShapeChange(figCent)
 % Swap the In/Out defaults when the selection shape changes: Circle uses
 % inner/outer DIAMETERS (300/600 µm), Line uses inner/outer corridor WIDTHS
-% (200/800 µm). Keeps the boxes at sensible per-shape defaults.
+% (100/800 µm). Keeps the boxes at sensible per-shape defaults.
 hShape = findobj(figCent, 'Tag','popCentShape');
 if isempty(hShape), return; end
 strs = get(hShape(1),'String');
@@ -4507,7 +4514,7 @@ vi   = round(get(hShape(1),'Value'));
 isLine = iscell(strs) && vi >= 1 && vi <= numel(strs) ...
     && strcmpi(strtrim(strs{vi}), 'Line');
 if isLine
-    inDef = '200';  outDef = '800';
+    inDef = '100';  outDef = '800';
 else
     inDef = '300';  outDef = '600';
 end
@@ -4515,6 +4522,77 @@ hIn  = findobj(figCent, 'Tag','edCentDiam');
 hOut = findobj(figCent, 'Tag','edSurDiam');
 if ~isempty(hIn),  set(hIn(1),  'String', inDef);  end
 if ~isempty(hOut), set(hOut(1), 'String', outDef); end
+end
+
+function onCentSizeChange(figCent)
+% Min/Max size sliders, on release: normal redraw, plus — while a "Select
+% region" selection is on file — live-refresh the linked Region+Surround
+% companion figures against the new size range.
+refreshRegionSelectionLive(figCent);
+redrawCentroidScatter(figCent);
+end
+
+function refreshRegionSelectionLive(figCent)
+% Called when the Min/Max size sliders change (on release). The Region and
+% Surround GROUP MEMBERSHIP is fixed by the original click (sel.selIDs /
+% sel.surIDs) and never changes afterward — only which of those animals
+% count as "in range" does, judged by each animal's own total lesion volume
+% against the CURRENT Min/Max range. That in-range subset is pushed to any
+% still-open Region+Surround companion figures: the time-course figure's
+% Region/Surround membership is restricted to it, while the lesion-volume
+% figure keeps every originally selected animal and just redraws the
+% out-of-range ones as open circles (drawLesionVolumeBarPlot) — so moving
+% the sliders never makes a point disappear, only recolors it and updates
+% the group median. A no-op when the toggle is Off or nothing is selected.
+hTgl = findobj(figCent, 'Tag','tglCentSelReg');
+if isempty(hTgl) || ~logical(get(hTgl(1),'Value')), return; end
+sel = getappdata(figCent, 'centRegionSel');
+if isempty(sel) || ~isfield(sel,'selIDs'), return; end
+S       = getappdata(figCent, 'centData');
+BehData = getappdata(figCent, 'BehData');
+if isempty(S) || isempty(BehData), return; end
+
+hMn = findobj(figCent, 'Tag','sldCentMinVol');
+hMx = findobj(figCent, 'Tag','sldCentMaxVol');
+vLo = -inf;  vHi = inf;
+if ~isempty(hMn), vLo = get(hMn(1),'Value'); end
+if ~isempty(hMx), vHi = get(hMx(1),'Value'); end
+if vLo > vHi, tmp = vLo;  vLo = vHi;  vHi = tmp; end
+
+selIDs = sel.selIDs;  surIDs = sel.surIDs;
+volReg = animalTotalLesionVol(S, selIDs);
+volSur = animalTotalLesionVol(S, surIDs);
+regInThr = volReg >= vLo & volReg <= vHi;
+surInThr = volSur >= vLo & volSur <= vHi;
+infMask = strcmp({BehData.Group}, 'Infarction') & ismember({BehData.ID}, selIDs(regInThr));
+surMask = strcmp({BehData.Group}, 'Infarction') & ismember({BehData.ID}, surIDs(surInThr));
+
+volStr = '';
+if sel.hasSurround && ~isempty(surIDs)
+    volStr = lesionVolumeCompareStr(S, selIDs, 'Region', surIDs, 'Surround', vLo, vHi);
+end
+
+figNew = getappdata(figCent, 'centLinkedTCFig');
+if ~isempty(figNew) && isgraphics(figNew, 'figure')
+    filterStr = getappdata(figCent, 'centLinkedFilterStr');
+    StdPOD    = getappdata(figCent, 'StdPOD');
+    drawPopulationFigure(BehData, figNew, StdPOD, {}, [], false, [], 'original', ...
+        infMask, filterStr, surMask, 'Surround');
+    set(figNew, 'Name', sprintf('Region+Surround time course (Region n=%d, Surround n=%d)', ...
+        sum(infMask), sum(surMask)));
+    setappdata(figNew, 'tcInfMask', infMask | surMask);
+    if ~isempty(volStr)
+        appendVolumeMatchTitle(figNew, volStr);
+    end
+end
+
+figHist = getappdata(figCent, 'centLinkedVolFig');
+if ~isempty(figHist) && isgraphics(figHist, 'figure') && ~isempty(volStr)
+    drawLesionVolumeBarPlot(figHist, volReg, 'Region', volSur, 'Surround', volStr, vLo, vHi);
+end
+if ~isempty(volStr)
+    fprintf('%s\n', volStr);
+end
 end
 
 function selectCentroidRegion(figCent)
@@ -4539,9 +4617,13 @@ isOn  = true;
 if ~isempty(hTgl), isOn = logical(get(hTgl(1),'Value')); end
 if ~isempty(hTgl), set(hTgl(1), 'String', ['Select region: ' onoff{isOn+1}]); end
 
-% Toggle turned Off → drop contour-only mode and repaint the normal view.
+% Toggle turned Off → drop contour-only mode, unlink the companion figures
+% (so a later Min/Max drag has nothing stale to push updates into), and
+% repaint the normal view.
 if ~isOn
     setappdata(figCent, 'centRegionSel', []);
+    setappdata(figCent, 'centLinkedTCFig',  []);
+    setappdata(figCent, 'centLinkedVolFig', []);
     redrawCentroidScatter(figCent);
     return
 end
@@ -4641,13 +4723,15 @@ else
 end
 
 % Size-range filter (Min/Max sliders) so the selection matches what's shown.
+% Stashed on `sel` (below) and re-read live by refreshRegionSelectionLive
+% whenever these sliders move afterward, so tightening/loosening the range
+% doesn't require re-clicking the region.
 hMn = findobj(figCent, 'Tag','sldCentMinVol');
 hMx = findobj(figCent, 'Tag','sldCentMaxVol');
 vLo = -inf;  vHi = inf;
 if ~isempty(hMn), vLo = get(hMn(1),'Value'); end
 if ~isempty(hMx), vHi = get(hMx(1),'Value'); end
 if vLo > vHi, tmp = vLo;  vLo = vHi;  vHi = tmp; end
-inRange = S.vol >= vLo & S.vol <= vHi;
 
 % Honor the "Dual centroids" toggle, exactly as the deficit heatmap does:
 % when Off, drop lesions from animals with >1 lesion (multi-centroid) so the
@@ -4655,97 +4739,48 @@ inRange = S.vol >= vLo & S.vol <= vHi;
 hDual = findobj(figCent, 'Tag','tglCentDual');
 inclDual = true;
 if ~isempty(hDual), inclDual = logical(get(hDual(1),'Value')); end
-if ~inclDual
-    [~, ~, ic] = unique(S.ids);
-    isMultiAll = reshape(accumarray(ic(:), 1) > 1, [], 1);
-    isMultiAll = reshape(isMultiAll(ic), 1, []);   % per-marker, S.ids order
-    inRange = inRange & ~isMultiAll;
-end
 
-% Build the INNER-region mask and the SURROUND-zone mask, both in the ORIGINAL
-% (unflipped) atlas frame — poly2mask(pts(:,1),pts(:,2),mapH,mapW), exactly as
-% the deficit heatmap builds coverage — whereas the clicks are in flipped plot
-% coords (cyF = mapH+1-cy). Convert clicks to the original frame (x unchanged,
-% y flipped) and test each lesion polygon vs the masks so the count matches the
-% heatmap's per-pixel coverage.
-%   Circle: inner = disc of radius radPx; surround = annulus out to outRadPx.
-%   Line:   inner = corridor rectangle of width widthPx along the segment;
-%           surround = wider rectangle (outWidPx) minus the inner corridor.
-% The surround always EXCLUDES the inner region ("exclude the selected region
-% but include the near surrounding area").
-[gx, gy] = meshgrid(1:S.mapW, 1:S.mapH);
-innerPolyPlot = [];  outerPolyPlot = [];   % drawing outlines (plot coords)
+% Line-shape drawing outlines (plot coords) — purely geometric, independent
+% of the size range, so computed once here and never touched again.
+innerPolyPlot = [];  outerPolyPlot = [];
 if isLine
-    % Endpoints in the original frame; corridor rectangles from the segment.
     p1 = [x1, S.mapH + 1 - y1];  p2 = [x2, S.mapH + 1 - y2];
     innerPolyOrig = corridorRect(p1, p2, widthPx/2);
-    innerMask = poly2mask(innerPolyOrig(:,1), innerPolyOrig(:,2), S.mapH, S.mapW);
     innerPolyPlot = [innerPolyOrig(:,1), S.mapH + 1 - innerPolyOrig(:,2)];
     if hasSurround
         outerPolyOrig = corridorRect(p1, p2, outWidPx/2);
-        outerMask = poly2mask(outerPolyOrig(:,1), outerPolyOrig(:,2), S.mapH, S.mapW);
-        annMask   = outerMask & ~innerMask;
         outerPolyPlot = [outerPolyOrig(:,1), S.mapH + 1 - outerPolyOrig(:,2)];
-    else
-        annMask = false(S.mapH, S.mapW);
-    end
-else
-    ycOrig   = S.mapH + 1 - yc;
-    dist2    = (gx - xc).^2 + (gy - ycOrig).^2;
-    innerMask = dist2 <= radPx^2;
-    if hasSurround
-        annMask = (dist2 <= outRadPx^2) & (dist2 > radPx^2);
-    else
-        annMask = false(S.mapH, S.mapW);
     end
 end
-
-inSel = false(1, numel(S.cx));
-inSur = false(1, numel(S.cx));
-if isfield(S,'polyPts') && ~isempty(S.polyPts)
-    for k = 1:numel(S.cx)
-        if ~inRange(k), continue; end
-        pts = S.polyPts{k};
-        if isempty(pts), continue; end
-        lm = poly2mask(pts(:,1), pts(:,2), S.mapH, S.mapW);
-        inInner = any(lm(:) & innerMask(:));
-        inSel(k) = inInner;
-        if hasSurround && ~inInner
-            inSur(k) = any(lm(:) & annMask(:));
-        end
-    end
-else
-    % No polygons cached: sample the masks at each centroid pixel (older data).
-    cxr = round(S.cx(:).');
-    cyr = round(S.mapH + 1 - S.cyF(:).');   % original-frame y of the centroid
-    for k = 1:numel(S.cx)
-        if ~inRange(k), continue; end
-        if cxr(k) < 1 || cxr(k) > S.mapW || cyr(k) < 1 || cyr(k) > S.mapH, continue; end
-        if innerMask(cyr(k), cxr(k))
-            inSel(k) = true;
-        elseif hasSurround && annMask(cyr(k), cxr(k))
-            inSur(k) = true;
-        end
-    end
-end
-selIDs = unique(S.ids(inSel));
-surIDs = unique(S.ids(inSur));
 
 % AP/LR of the region centre (mm from bregma) for the labels.
 bx = 570;  by = S.mapH + 1 - 540;
 AP_mm = (yc - by) / PX_PER_MM;
 LR_mm = (xc - bx) / PX_PER_MM;
 
-% Stash the selection so redrawCentroidScatter can render the contour-only
-% view (and keep it across slider redraws while the toggle stays On).
-infMask = strcmp({BehData.Group}, 'Infarction') & ismember({BehData.ID}, selIDs);
-surMask = strcmp({BehData.Group}, 'Infarction') & ismember({BehData.ID}, surIDs);
+% Selection geometry (independent of the size range) — kept in appdata so
+% refreshRegionSelectionLive can re-run the overlap test below against a
+% later size range without re-prompting for a click.
 sel = struct('shape',selShape, 'xc',xc, 'yc',yc, 'radPx',radPx, 'diamUM',diamUM, ...
-             'inSel',inSel, 'AP',AP_mm, 'LR',LR_mm, 'nAni',sum(infMask), ...
-             'outRadPx',outRadPx, 'surUM',surUM, 'hasSurround',hasSurround, ...
-             'inSur',inSur, 'nSur',sum(surMask), ...
-             'x1',x1, 'y1',y1, 'x2',x2, 'y2',y2, 'widthPx',widthPx, ...
-             'outWidPx',outWidPx, 'innerPoly',innerPolyPlot, 'outerPoly',outerPolyPlot);
+             'AP',AP_mm, 'LR',LR_mm, 'outRadPx',outRadPx, 'surUM',surUM, ...
+             'hasSurround',hasSurround, 'x1',x1, 'y1',y1, 'x2',x2, 'y2',y2, ...
+             'widthPx',widthPx, 'outWidPx',outWidPx, ...
+             'innerPoly',innerPolyPlot, 'outerPoly',outerPolyPlot);
+
+% Overlap test (see computeRegionMasks): which lesions/animals fall inside
+% the inner region ("Region" group) and, if enabled, the surrounding zone
+% ("Surround" group) — restricted to lesions within [vLo, vHi].
+[inSel, inSur, selIDs, surIDs, infMask, surMask] = ...
+    computeRegionMasks(S, BehData, sel, vLo, vHi, inclDual);
+
+% Stash the selection (now complete) so redrawCentroidScatter can render the
+% contour-only view (and keep it across slider redraws while the toggle
+% stays On). selIDs/surIDs is the FIXED Region/Surround membership: later
+% Min/Max moves (refreshRegionSelectionLive) only reclassify these same
+% animals in/out of range — they never add or drop an animal.
+sel.inSel = inSel;  sel.inSur = inSur;
+sel.selIDs = selIDs;  sel.surIDs = surIDs;
+sel.nAni  = sum(infMask);  sel.nSur = sum(surMask);
 setappdata(figCent, 'centRegionSel', sel);
 redrawCentroidScatter(figCent);   % draw the contour-only view now
 
@@ -4789,20 +4824,20 @@ drawPopulationFigure(BehData, figNew, StdPOD, {}, [], false, [], 'original', ...
 % total per-animal lesion volume, so a deficit difference between them can't
 % just be a lesion-size confound. Appended to the population figure's own
 % title (not a separate figure) so it travels with "Apply marks to plot".
+figHist = [];
 if hasSurround && any(surMask)
-    [volStr, volReg, volSur] = lesionVolumeCompareStr(S, selIDs, 'Region', surIDs, 'Surround');
-    line1 = getappdata(figNew, 'popTitleLine1');
-    if ~isempty(line1)
-        setappdata(figNew, 'popTitleLine1', sprintf('%s\n%s', line1, volStr));
-        popStats = getappdata(figNew, 'popStats');
-        spec     = getappdata(figNew, 'popMarkSpec');
-        if ~isempty(popStats) && ~isempty(spec)
-            setPopMarkTitle(figNew, spec, popStats.k_holm);
-        end
-    end
+    [volStr, volReg, volSur] = lesionVolumeCompareStr(S, selIDs, 'Region', surIDs, 'Surround', vLo, vHi);
+    appendVolumeMatchTitle(figNew, volStr);
     fprintf('%s\n', volStr);
-    openLesionVolumeHistFigure(volReg, 'Region', volSur, 'Surround', volStr);
+    figHist = openLesionVolumeHistFigure(volReg, 'Region', volSur, 'Surround', volStr, vLo, vHi);
 end
+
+% Link this Lesion Centroids figure to its Region+Surround companions so
+% refreshRegionSelectionLive (Min/Max sliders, on release) can push updated
+% masks/thresholds into them without re-clicking the region.
+setappdata(figCent, 'centLinkedTCFig',    figNew);
+setappdata(figCent, 'centLinkedVolFig',   figHist);
+setappdata(figCent, 'centLinkedFilterStr', filterStr);
 
 % "Lesion map" companion button (shows both sets via the contour view).
 setappdata(figNew, 'BehData',      BehData);
@@ -4839,41 +4874,177 @@ n = [-u(2), u(1)];               % unit normal
 poly = [p1 + n*half; p2 + n*half; p2 - n*half; p1 - n*half];
 end
 
-function [str, volA, volB] = lesionVolumeCompareStr(S, idsA, labelA, idsB, labelB)
+function [inSel, inSur, selIDs, surIDs, infMask, surMask] = ...
+    computeRegionMasks(S, BehData, sel, vLo, vHi, inclDual)
+% Re-run the "Select region" geometric overlap test — which lesions fall
+% inside the inner region ("Region" group) and, if enabled, the surrounding
+% zone ("Surround" group) — against a given [vLo, vHi] size range, using the
+% selection geometry already stored in `sel` (shape/xc/yc/radPx/outRadPx or
+% x1/y1/x2/y2/widthPx/outWidPx). Shared by the initial click in
+% selectCentroidRegion and by refreshRegionSelectionLive (Min/Max sliders,
+% after the click) so tightening/loosening the size range doesn't require
+% re-clicking the region. See selectCentroidRegion for the frame-convention
+% notes (clicks are in flipped plot coords; masks are built in the original
+% atlas frame, matching the deficit heatmap's per-pixel coverage).
+isLine      = strcmp(sel.shape, 'line');
+hasSurround = sel.hasSurround;
+
+inRange = S.vol >= vLo & S.vol <= vHi;
+if ~inclDual
+    [~, ~, ic] = unique(S.ids);
+    isMultiAll = reshape(accumarray(ic(:), 1) > 1, [], 1);
+    isMultiAll = reshape(isMultiAll(ic), 1, []);   % per-marker, S.ids order
+    inRange = inRange & ~isMultiAll;
+end
+
+[gx, gy] = meshgrid(1:S.mapW, 1:S.mapH);
+if isLine
+    p1 = [sel.x1, S.mapH + 1 - sel.y1];  p2 = [sel.x2, S.mapH + 1 - sel.y2];
+    innerPolyOrig = corridorRect(p1, p2, sel.widthPx/2);
+    innerMask = poly2mask(innerPolyOrig(:,1), innerPolyOrig(:,2), S.mapH, S.mapW);
+    if hasSurround
+        outerPolyOrig = corridorRect(p1, p2, sel.outWidPx/2);
+        outerMask = poly2mask(outerPolyOrig(:,1), outerPolyOrig(:,2), S.mapH, S.mapW);
+        annMask   = outerMask & ~innerMask;
+    else
+        annMask = false(S.mapH, S.mapW);
+    end
+else
+    ycOrig   = S.mapH + 1 - sel.yc;
+    dist2    = (gx - sel.xc).^2 + (gy - ycOrig).^2;
+    innerMask = dist2 <= sel.radPx^2;
+    if hasSurround
+        annMask = (dist2 <= sel.outRadPx^2) & (dist2 > sel.radPx^2);
+    else
+        annMask = false(S.mapH, S.mapW);
+    end
+end
+
+inSel = false(1, numel(S.cx));
+inSur = false(1, numel(S.cx));
+if isfield(S,'polyPts') && ~isempty(S.polyPts)
+    for k = 1:numel(S.cx)
+        if ~inRange(k), continue; end
+        pts = S.polyPts{k};
+        if isempty(pts), continue; end
+        lm = poly2mask(pts(:,1), pts(:,2), S.mapH, S.mapW);
+        inInner = any(lm(:) & innerMask(:));
+        inSel(k) = inInner;
+        if hasSurround && ~inInner
+            inSur(k) = any(lm(:) & annMask(:));
+        end
+    end
+else
+    % No polygons cached: sample the masks at each centroid pixel (older data).
+    cxr = round(S.cx(:).');
+    cyr = round(S.mapH + 1 - S.cyF(:).');   % original-frame y of the centroid
+    for k = 1:numel(S.cx)
+        if ~inRange(k), continue; end
+        if cxr(k) < 1 || cxr(k) > S.mapW || cyr(k) < 1 || cyr(k) > S.mapH, continue; end
+        if innerMask(cyr(k), cxr(k))
+            inSel(k) = true;
+        elseif hasSurround && annMask(cyr(k), cxr(k))
+            inSur(k) = true;
+        end
+    end
+end
+selIDs = unique(S.ids(inSel));
+surIDs = unique(S.ids(inSur));
+infMask = strcmp({BehData.Group}, 'Infarction') & ismember({BehData.ID}, selIDs);
+surMask = strcmp({BehData.Group}, 'Infarction') & ismember({BehData.ID}, surIDs);
+end
+
+function appendVolumeMatchTitle(figNew, volStr)
+% Append the Region-vs-Surround volume-match line to a population figure's
+% own title (popTitleLine1), so it survives "Apply marks to plot" title
+% rebuilds and any later drawPopulationFigure redraw (refreshRegionSelectionLive
+% re-appends it after each such redraw, since drawPopulationFigure resets
+% popTitleLine1 from scratch).
+line1 = getappdata(figNew, 'popTitleLine1');
+if isempty(line1), return; end
+setappdata(figNew, 'popTitleLine1', sprintf('%s\n%s', line1, volStr));
+popStats = getappdata(figNew, 'popStats');
+spec     = getappdata(figNew, 'popMarkSpec');
+if ~isempty(popStats) && ~isempty(spec)
+    setPopMarkTitle(figNew, spec, popStats.k_holm);
+end
+end
+
+function [str, volA, volB] = lesionVolumeCompareStr(S, idsA, labelA, idsB, labelB, vLo, vHi)
 % Wilcoxon rank-sum comparison of TOTAL per-animal lesion volume (mm³,
 % summed across all of that animal's sub-lesions in the centroid data S)
 % between two animal-ID lists — e.g. the Region vs Surround groups from
 % "Select region". Used to confirm the two groups are volume-matched before
 % attributing a behavioral difference between them to lesion location rather
-% than lesion size. Also returns the per-animal volume vectors (volA, volB)
-% so the caller can plot them (e.g. the volume-match histogram).
+% than lesion size. Also returns the per-animal volume vectors (volA, volB,
+% UNFILTERED — every originally selected animal) so the caller can plot them
+% (e.g. the volume-match figure, which needs the full set to draw open
+% circles for the ones outside [vLo, vHi]).
+%
+% The reported mean/SD/p-value, however, are computed on just the animals
+% CURRENTLY inside [vLo, vHi] (default: no limit), so this text tracks the
+% Lesion Centroids Min/Max sliders exactly like the bar figure's median —
+% refreshRegionSelectionLive re-calls this on every slider release.
+if nargin < 6 || isempty(vLo), vLo = -inf; end
+if nargin < 7 || isempty(vHi), vHi = inf;  end
 volA = animalTotalLesionVol(S, idsA);
 volB = animalTotalLesionVol(S, idsB);
-if numel(volA) >= 2 && numel(volB) >= 2
-    p = ranksum(volA, volB);
+volAThr = volA(volA >= vLo & volA <= vHi);
+volBThr = volB(volB >= vLo & volB <= vHi);
+if numel(volAThr) >= 2 && numel(volBThr) >= 2
+    p = ranksum(volAThr, volBThr);
     pStr = sprintf('p=%.3f (ranksum)', p);
 else
     pStr = 'p=n/a (n<2)';
 end
-sdA = 0;  if numel(volA) >= 2, sdA = std(volA); end
-sdB = 0;  if numel(volB) >= 2, sdB = std(volB); end
-str = sprintf(['Volume match check — %s %.3f\x00B1%.3f mm³ (n=%d) vs %s ' ...
+muA = NaN;  if ~isempty(volAThr), muA = mean(volAThr); end
+muB = NaN;  if ~isempty(volBThr), muB = mean(volBThr); end
+sdA = 0;    if numel(volAThr) >= 2, sdA = std(volAThr); end
+sdB = 0;    if numel(volBThr) >= 2, sdB = std(volBThr); end
+rangeStr = '';
+if isfinite(vLo) || isfinite(vHi)
+    rangeStr = sprintf(' (%.2f-%.2f mm³ range)', vLo, vHi);
+end
+str = sprintf(['Volume match check%s — %s %.3f\x00B1%.3f mm³ (n=%d) vs %s ' ...
                '%.3f\x00B1%.3f mm³ (n=%d): %s'], ...
-    labelA, mean(volA), sdA, numel(volA), labelB, mean(volB), sdB, numel(volB), pStr);
+    rangeStr, labelA, muA, sdA, numel(volAThr), labelB, muB, sdB, numel(volBThr), pStr);
 end
 
-function figHist = openLesionVolumeHistFigure(volA, labelA, volB, labelB, volStr)
-% Bar graph (mean +/- SEM) of per-animal total lesion volume for the two
-% "Select region" groups (Region vs Surround), with every animal's own
-% volume overlaid as a jittered dot — the visual companion to the
-% volume-match check in lesionVolumeCompareStr. Colors match Region=red /
-% Surround=blue used throughout the Region+Surround time-course figure
-% (cInf/cOvl there).
-cA = [0.85, 0.15, 0.15];   % Region
-cB = [0.00, 0.35, 0.85];   % Surround
+function figHist = openLesionVolumeHistFigure(volA, labelA, volB, labelB, volStr, vLo, vHi)
+% Creates the Region-vs-Surround lesion-volume companion figure and draws
+% its first frame. See drawLesionVolumeBarPlot for the plot itself and for
+% how it's refreshed in place when the Lesion Centroids Min/Max sliders
+% move afterward.
+if nargin < 6, vLo = -inf; end
+if nargin < 7, vHi = inf;  end
 figHist = figure('Name', sprintf('Lesion volume — %s vs %s', labelA, labelB), ...
     'Position', [900 850 480 420]);
-ax = axes('Parent', figHist);
+drawLesionVolumeBarPlot(figHist, volA, labelA, volB, labelB, volStr, vLo, vHi);
+end
+
+function drawLesionVolumeBarPlot(figHist, volA, labelA, volB, labelB, volStr, vLo, vHi)
+% (Re)draws the Region vs Surround lesion-volume panel into figHist in
+% place (no new figure): one bar per group at the MEDIAN (IQR whiskers) of
+% that group's animals currently inside the Lesion Centroids Min/Max size
+% range [vLo, vHi], every animal's own total lesion volume overlaid as a
+% jittered dot — filled when inside that range, open (hollow) when outside
+% it, so moving the Min/Max sliders after "Select region" visibly
+% excludes/restores points and updates the median/whiskers without needing
+% a new figure. Colors match Region=red / Surround=blue used throughout the
+% Region+Surround time-course figure (cInf/cOvl there).
+if nargin < 7 || isempty(vLo), vLo = -inf; end
+if nargin < 8 || isempty(vHi), vHi = inf;  end
+cA = [0.85, 0.15, 0.15];   % Region
+cB = [0.00, 0.35, 0.85];   % Surround
+
+hAx = findobj(figHist, 'Type','axes');
+if isempty(hAx)
+    ax = axes('Parent', figHist);
+else
+    ax = hAx(1);
+    cla(ax);
+end
+axis(ax, 'on');
 hold(ax, 'on');
 if isempty(volA) && isempty(volB)
     text(ax, 0.5, 0.5, 'No lesion volumes to show', 'Units','normalized', ...
@@ -4888,18 +5059,29 @@ JITTER = 0.12;
 for g = 1:2
     v = groups{g};
     n = numel(v);
-    if n > 0
-        mu = mean(v);
-        bar(ax, g, mu, 0.6, 'FaceColor', colors{g}, 'FaceAlpha', 0.35, ...
+    if n == 0, continue; end
+    inThr = v >= vLo & v <= vHi;
+    if any(inThr)
+        vThr = v(inThr);
+        med  = median(vThr);
+        bar(ax, g, med, 0.6, 'FaceColor', colors{g}, 'FaceAlpha', 0.35, ...
             'EdgeColor', colors{g}, 'LineWidth', 1.5);
-        if n > 1
-            sem = std(v) / sqrt(n);
-            errorbar(ax, g, mu, sem, 'Color', 'k', 'LineWidth', 1.2, ...
-                'CapSize', 10, 'LineStyle', 'none');
+        if numel(vThr) > 1
+            % IQR whiskers (25th/75th percentile) around the median, matching
+            % the nonparametric (rank-sum) stat this figure otherwise reports.
+            q = prctile(vThr, [25 75]);
+            errorbar(ax, g, med, med - q(1), q(2) - med, 'Color', 'k', ...
+                'LineWidth', 1.2, 'CapSize', 10, 'LineStyle', 'none');
         end
-        jitterX = g + (rand(n,1) - 0.5) * 2 * JITTER;
-        scatter(ax, jitterX, v, 45, colors{g}, 'filled', ...
+    end
+    jitterX = g + (rand(n,1) - 0.5) * 2 * JITTER;
+    if any(inThr)
+        scatter(ax, jitterX(inThr), v(inThr), 45, colors{g}, 'filled', ...
             'MarkerEdgeColor', 'k', 'MarkerFaceAlpha', 0.85);
+    end
+    if any(~inThr)
+        scatter(ax, jitterX(~inThr), v(~inThr), 45, ...
+            'MarkerFaceColor', 'none', 'MarkerEdgeColor', colors{g}, 'LineWidth', 1.3);
     end
 end
 set(ax, 'XTick', [1 2], 'XTickLabel', ...
@@ -4907,7 +5089,8 @@ set(ax, 'XTick', [1 2], 'XTickLabel', ...
 xlim(ax, [0.4 2.6]);
 ylabel(ax, 'Total lesion volume per animal (mm³)');
 set(ax, 'TickDir','out', 'Box','off');
-title(ax, volStr, 'FontSize', 9, 'Interpreter','none');
+title(ax, {volStr, ['bar = median (whiskers = IQR) of filled (in Min/Max range) ' ...
+    'points; open circles = outside range']}, 'FontSize', 9, 'Interpreter','none');
 end
 
 function v = animalTotalLesionVol(S, ids)
