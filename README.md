@@ -12,6 +12,7 @@ The pipeline quantifies right-forelimb behavior in a lever-pull task after photo
 | 2. Histology: lesion registration to CCFv3 | `AP_histology-master/` (`AP_histology.m` GUI, `ap_histology.annotate_lesion`) | DAPI coronal sections (`slice_1.png`, ...) | `<animal>/CCF/LesionMapAllenCCF.mat` |
 | 3. Lesion volume per region and per-animal summary | `OutputSummary_MOp_volume_Lever.m`, `Output_histology_selectedAnimal.m` | outputs of 1 and 2 | `InfarctionShamIDdata.mat`, figures |
 | 4. Group comparison, time courses, pixel-wise lesion–symptom map with cluster-level permutation statistics | `LeverPullTask_InfVsSham.m` (reads the animal table via `Read_NOIO_summary.m`) | outputs of 1–3 | manuscript figures |
+| 5. Robustness check of the M1 vs S1 comparison (Fig. 2): exhaustive subsampling of 7 of the 17 M1 animals | `Analysis_M1subsample_vsS1.m` (runs `LeverPullTask_InfVsSham.m` and reads its `BehData` / centroid data) | outputs of 4 | `Analysis_M1subsample_vsS1/` (`results.mat`, figure, `summary.md`) |
 
 Dorsal-view region masks used for the pixel-wise map are in `AllenCCF/` (`MOp_topview_mask.mat`, `Region_topview_masks.mat`); `AP_histology-master/AllenMapTopView.m` regenerates them from the atlas.
 
