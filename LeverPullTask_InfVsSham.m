@@ -139,6 +139,8 @@ for i = 1:length(allIDs)
     CC_gmm    = NaN(nSess, 1);
     CaseHoldCount = zeros(nSess, 1);   % number of Case Holding correction segments
     nFramesArr    = zeros(nSess, 1);   % frame count — used to pick longest when same day
+    hasCorrArr    = false(nSess, 1);   % whether a _corrections.mat exists for this file —
+                                        % used to break exact same-day frame-count ties (see below)
     FT_L   = NaN(nSess, 1);
     RHT_L  = NaN(nSess, 1);
     CC_L   = NaN(nSess, 1);
@@ -207,6 +209,7 @@ for i = 1:length(allIDs)
         % Apply corrections: recompute FT/RHT/CC and count Case Holding
         corrFname = strrep(fname, '_FallCount.mat', '_corrections.mat');
         corrPath  = fullfile(animalFolder, corrFname);
+        hasCorrArr(nValid) = exist(corrPath, 'file') > 0;
         if exist(corrPath, 'file')
             try
                 Sc2 = load(corrPath, 'corrections');
@@ -241,6 +244,7 @@ for i = 1:length(allIDs)
     CC_gmm        = CC_gmm(1:nValid);
     CaseHoldCount = CaseHoldCount(1:nValid);
     nFramesArr    = nFramesArr(1:nValid);
+    hasCorrArr    = hasCorrArr(1:nValid);
     FT_L   = FT_L(1:nValid);
     RHT_L  = RHT_L(1:nValid);
     CC_L   = CC_L(1:nValid);
@@ -257,6 +261,7 @@ for i = 1:length(allIDs)
     CC_gmm        = CC_gmm(sortIdx);
     CaseHoldCount = CaseHoldCount(sortIdx);
     nFramesArr    = nFramesArr(sortIdx);
+    hasCorrArr    = hasCorrArr(sortIdx);
     FT_L   = FT_L(sortIdx);
     RHT_L  = RHT_L(sortIdx);
     CC_L   = CC_L(sortIdx);
@@ -285,12 +290,26 @@ for i = 1:length(allIDs)
         mask    = POD_raw == uniquePODs(d);
         maskIdx = find(mask);
         if numel(maskIdx) > 1
-            % Multiple recordings on same day — pick the one with most frames
-            [~, best] = max(nFramesArr(maskIdx));
-            sel = maskIdx(best);
-            fprintf('  %s POD%d: %d recordings, using longest (%d frames: %s)\n', ...
+            % Multiple recordings on same day — pick the one with most frames.
+            % When two duplicates tie exactly on frame count (e.g. a file
+            % re-exported under a near-identical name, differing only by
+            % whitespace, that byte-for-byte duplicates an earlier one),
+            % prefer whichever of the tied files has a saved _corrections.mat
+            % — a reviewed/corrected duplicate should win over an identical
+            % but never-opened one, otherwise dir()'s (often alphabetical,
+            % so a leading-space filename sorts first) ordering silently
+            % picks the uncorrected copy every time BehData is rebuilt.
+            maxFrames = max(nFramesArr(maskIdx));
+            tiedIdx   = maskIdx(nFramesArr(maskIdx) == maxFrames);
+            if numel(tiedIdx) > 1 && any(hasCorrArr(tiedIdx))
+                sel = tiedIdx(find(hasCorrArr(tiedIdx), 1));
+            else
+                sel = tiedIdx(1);
+            end
+            fprintf('  %s POD%d: %d recordings, using longest (%d frames: %s)%s\n', ...
                 animalID, uniquePODs(d), numel(maskIdx), nFramesArr(sel), ...
-                datestr(sessDates(sel), 'yyyy-mm-dd HH:MM'));
+                datestr(sessDates(sel), 'yyyy-mm-dd HH:MM'), ...
+                repmat(' [tie broken by corrections.mat]', 1, numel(tiedIdx) > 1 && any(hasCorrArr(tiedIdx))));
         else
             sel = maskIdx;
         end
@@ -455,7 +474,7 @@ uicontrol(fig7, 'Style',    'listbox', ...
                 'Position', [0.01 0.03 0.07 0.93], ...
                 'FontSize', 10, ...
                 'Tag',      'listboxAnimals', ...
-                'Callback', @(src,~) plotSingleAnimal(src.Value, BehData, fig7));
+                'Callback', @(src,~) plotSingleAnimal(src.Value, getappdata(fig7,'BehData'), fig7));
 
 % --- Behavioral axes (left-center, 4 rows: FT / CC / RHT / Release) ---
 axLeft = 0.10;  axW = 0.38;
@@ -590,7 +609,7 @@ uicontrol(fig7, 'Style', 'checkbox', 'String', 'Show Left forelimb', ...
     'FontSize', 9, 'Tag', 'chkShowLeft', 'Value', 0, ...
     'BackgroundColor', get(fig7, 'Color'), ...
     'Callback', @(~,~) plotSingleAnimal( ...
-        get(findobj(fig7,'Tag','listboxAnimals'),'Value'), BehData, fig7));
+        get(findobj(fig7,'Tag','listboxAnimals'),'Value'), getappdata(fig7,'BehData'), fig7));
 
 % Draw initial selection
 plotSingleAnimal(defIdx, BehData, fig7);
@@ -6973,6 +6992,15 @@ refreshCorrectionOverlay(figV);   % also calls buildSegmentStarts/buildSubsegmen
 % Restore xlim after refresh (buildSegmentImage resets it to tSec(end))
 if ~isempty(axD) && isgraphics(axD)
     xlim(axD, [0, xLimMax]);
+end
+
+% If this session already has saved corrections, recompute and preview
+% their effect immediately (same computation "Save" runs) instead of
+% leaving the status text blank until the user re-saves. Without this, a
+% session reopened with pre-existing corrections looks unchanged even
+% though the correction segments (drawn above) are correctly loaded.
+if ~isempty(corrections)
+    applyCorrectionsToBehData(figV);
 end
 
 updateFrameInfo(figV, 1, nFrames, fps_native);
