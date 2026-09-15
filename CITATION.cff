@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this code, please cite the accompanying paper (details will be added on publication)."
-title: "lesion-symptom-map-leverpull"
+title: "lesion-symptom-map-leverpull: analysis code for lever-pull task deficits after photothrombotic cortical infarction in mice"
 type: software
 license: GPL-3.0
 repository-code: "https://github.com/hironobu-osaki/lesion-symptom-map-leverpull"
