@@ -8805,8 +8805,8 @@ end
 function pyExe = getDeepLabCutPython()
 % Locate the DEEPLABCUT conda env python.exe used to run GenerateFallCount.py.
 % The path was previously hardcoded to a single user's conda env, which
-% only exists on one machine (e.g. on DESKTOP-RTGTGMK the env lives under
-% anaconda3, not .conda). Strategy mirrors getDataServerRoot:
+% only exists on one machine (on other machines the env may live under
+% anaconda3 rather than .conda). Strategy mirrors getDataServerRoot:
 %   1. Cached value (persistent) if still valid.
 %   2. Per-machine saved pref.
 %   3. Known conda roots under the current user profile (and ProgramData).
