@@ -642,6 +642,10 @@ for a = 1:numel(BehData)
         allCC = [allCC; BehData(a).CC_sess(:)]; %#ok<AGROW>
     end
 end
+% z-score reference: pooled over every session of every animal in BehData
+% (infarction N = 38 + sham N = 9). Dual-lesion animals (NO1, NO19, IO7) are
+% removed when the animal list is read (Read_NOIO_summary.m, decision D1,
+% 2026-10-16), so they contribute neither here nor to any later analysis.
 [muFT, sdFT] = poolMeanStd(allFT, []);
 [muCC, sdCC] = poolMeanStd(allCC, []);
 svSess = zStd(ftSess(:), muFT, sdFT) + zStd(ccSess(:), muCC, sdCC);

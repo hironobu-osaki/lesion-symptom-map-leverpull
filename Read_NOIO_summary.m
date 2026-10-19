@@ -82,5 +82,13 @@ for r = 3:nRows
     NOIOData(idx).SessionLabels = sessionLabels;
 end
 
+% Dual-lesion animals are excluded from every computation (decision D1, 2026-10-16),
+% including z-score reference values and the bootstrap pool.
+dualIDs = {'NO1','NO19','IO7'};
+isDual = ismember(string({NOIOData.ID}), dualIDs);
+fprintf('Excluding %d dual-lesion animals: %s\n', nnz(isDual), strjoin(string({NOIOData(isDual).ID}), ', '));
+NOIOData = NOIOData(~isDual);
+idx = numel(NOIOData);
+
 fprintf('Loaded %d animals.\n', idx);
 disp({NOIOData.ID}');
