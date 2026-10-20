@@ -4,6 +4,8 @@ title: "lesion-symptom-map-leverpull: analysis code for lever-pull task deficits
 type: software
 license: GPL-3.0
 repository-code: "https://github.com/hironobu-osaki/lesion-symptom-map-leverpull"
+version: 1.1.0
+date-released: 2026-10-20
 authors:
   - family-names: Osaki
     given-names: Hironobu

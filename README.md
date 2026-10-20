@@ -1,6 +1,6 @@
 # lesion-symptom-map-leverpull
 
-Analysis code for *Functional vulnerability of the M1/S1 transitional zone in post-stroke motor deficits in mice* (Osaki, Nakashima, Iwai, Masamizu; in preparation).
+Analysis code for *Functional vulnerability of the M1/S1 transitional zone in post-stroke motor deficits in mice* (Osaki, Nakashima, Iwai, Masamizu; under review at *Neuroscience Research*).
 
 The pipeline quantifies right-forelimb behavior in a lever-pull task after photothrombotic infarction of mouse sensorimotor cortex, registers every lesion to the Allen Mouse Brain Common Coordinate Framework (CCFv3), and maps behavioral impairment pixel by pixel on the dorsal cortical surface.
 
@@ -47,3 +47,8 @@ Processed data needed to reproduce the figures (per-session `*_FallCount.mat`, p
 ## License
 
 GPL-3.0. See `LICENSE`. Because the repository contains modified GPL-3.0 code, derivative works must also be distributed under GPL-3.0.
+
+## Versions
+
+- v1.1.0 (2026-10-20): version used for the revised manuscript. Animals with a second, unintended lesion (dual-lesion animals) are excluded when the animal list is read (`Read_NOIO_summary.m`), so that all analyses use single-lesion animals only.
+- v1.0.0 (2026-09-15): version used for the original submission.
