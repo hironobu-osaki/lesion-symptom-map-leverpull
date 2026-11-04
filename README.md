@@ -1,8 +1,44 @@
 # lesion-symptom-map-leverpull
 
-Analysis code for *Functional vulnerability of the M1/S1 transitional zone in post-stroke motor deficits in mice* (Osaki, Nakashima, Iwai, Masamizu; under review at *Neuroscience Research*).
+Analysis code for *Functional vulnerability of the M1/S1 transitional zone in post-stroke motor deficits in mice* (Osaki et al.; in press at *Neuroscience Research*).
 
 The pipeline quantifies right-forelimb behavior in a lever-pull task after photothrombotic infarction of mouse sensorimotor cortex, registers every lesion to the Allen Mouse Brain Common Coordinate Framework (CCFv3), and maps behavioral impairment pixel by pixel on the dorsal cortical surface.
+
+<p align="center"><img src="docs/images/sections.gif" width="560" alt="Stepping through the coronal sections of one animal: the dorsal CCFv3 view with the projected lesion and the line of the current section (left), and each DAPI section registered to the atlas, with the atlas outlines in cyan and the lesion outline in red (right)">&nbsp;&nbsp;<img src="docs/images/lesion3d.gif" width="300" alt="The same lesion rendered in 3D inside the CCFv3 brain outline, rotating"></p>
+<p align="center"><sub>One animal (NO57) in the single-animal viewer of <code>LeverPullTask_InfVsSham.m</code>. Left: the 28 coronal DAPI sections, each registered to its CCFv3 plane (atlas outlines in cyan, lesion outline in red), and the dorsal view on which the lesion is projected (cyan line: current section; red cross: bregma). Right: the registered lesion in 3D inside the CCFv3 brain outline ("Lesion 3D movie" button).</sub></p>
+
+## What the code does
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/tracking.png" alt="Paw-to-lever distance of one session with the hold and fall thresholds, detected falls, and the lever signal with pull onsets and rewards"><br><b>Forelimb tracking and fall detection.</b> DeepLabCut keypoints of the paw, digits and lever (frontal and mirror views) give the paw-to-lever distance; <code>GenerateFallCount.py</code> detects falls as excursions beyond the fall threshold and turns them into per-session <i>fall time</i> and <i>fall count</i>, the two measures of impairment (composite score: sum of their z-scores). Shown: one session with the hold (5 mm) and fall (7.5 mm) thresholds, detected falls (red triangles) and the lever signal with pull onsets and rewards.</td>
+<td width="50%" valign="top"><img src="docs/images/lesion-groups.png" alt="Lesion outlines of the M1-, M2- and S1-centered groups on the dorsal atlas"><br><b>Group comparison by lesion centroid.</b> Each lesion is assigned to M1, M2 or S1 by the atlas region of its centroid; the time courses and the volume-deficit relationship are compared between the groups and with sham (Fig. 2 of the paper).</td>
+</tr>
+<tr>
+<td valign="top"><img src="docs/images/map-method.png" alt="Schematic of the pixel-wise map: binarization at the median, mapping of each lesion, averaging per pixel, pixels covered by at least two lesions"><br><b>Pixel-wise lesion-symptom map.</b> Animals are split at the median of the score (more-affected = 100, less-affected = 0); every lesion is projected on the dorsal atlas and each pixel takes the mean over the lesions covering it (at least two). Clusters are tested by Fisher's exact test with cluster-mass permutation correction, separately for the acute, sub-acute and chronic phases.</td>
+<td valign="top"><img src="docs/images/border-surround.png" alt="Border-crossing and surrounding lesions and their time courses"><br><b>Border-crossing vs surrounding lesions.</b> Lesions are grouped by whether they cross the M1/S1 border (red) or lie beside it (blue); with lesion volume as a covariate, border-crossing lesions produce a larger and more persistent deficit over the 28-day time course (sham in black; a volume-matched version is in the supplement).</td>
+</tr>
+</table>
+
+<p align="center"><img src="docs/images/map-all.gif" width="880" alt="Lesion-symptom maps for fall time, fall count and the composite score, changing together from the acute to the sub-acute and the chronic phase"></p>
+<p align="center"><sub>Lesion-symptom maps over recovery. Each map fades from the acute (POD 3–7) to the sub-acute (POD 10–24) and the chronic (POD 28) phase; colour: fraction of the lesions covering a pixel that came from the more-affected half of the cohort (pixels covered by at least two lesions; black cross: bregma). The territory in which most covering lesions came from the more-affected half (red) contracts as the animals recover, while the region most associated with the deficit stays at the M1/S1 border.</sub></p>
+
+## How it works
+
+```mermaid
+flowchart LR
+    V[Lever-pull videos<br>frontal + mirror] --> D[DeepLabCut<br>.h5 keypoints]
+    D --> F[GenerateFallCount.py<br>fall time, fall count]
+    S[DAPI sections] --> A[AP_histology GUI<br>lesion outlines, CCFv3 alignment]
+    A --> O[OutputSummary_MOp_volume_Lever.m<br>volume per region, dorsal projection]
+    F --> M[LeverPullTask_InfVsSham.m]
+    O --> M
+    M --> G[Group comparison<br>M1 / M2 / S1, border vs surround]
+    M --> P[Pixel-wise map<br>cluster permutation test]
+    M --> R[Analysis_M1subsample_vsS1.m<br>robustness check]
+```
+
+Steps 1 and 2 need the raw videos and section images; steps 3 to 5 run from the processed data that will be deposited on Zenodo (see [Data](#data)). All figures in this README come from the pipeline outputs.
 
 ## Pipeline
 
@@ -12,7 +48,7 @@ The pipeline quantifies right-forelimb behavior in a lever-pull task after photo
 | 2. Histology: lesion registration to CCFv3 | `AP_histology-master/` (`AP_histology.m` GUI, `ap_histology.annotate_lesion`) | DAPI coronal sections (`slice_1.png`, ...) | `<animal>/CCF/LesionMapAllenCCF.mat` |
 | 3. Lesion volume per region and per-animal summary | `OutputSummary_MOp_volume_Lever.m`, `Output_histology_selectedAnimal.m` | outputs of 1 and 2 | `InfarctionShamIDdata.mat`, figures |
 | 4. Group comparison, time courses, pixel-wise lesion–symptom map with cluster-level permutation statistics | `LeverPullTask_InfVsSham.m` (reads the animal table via `Read_NOIO_summary.m`) | outputs of 1–3 | manuscript figures |
-| 5. Robustness check of the M1 vs S1 comparison (Fig. 2): exhaustive subsampling of 7 of the 17 M1 animals | `Analysis_M1subsample_vsS1.m` (runs `LeverPullTask_InfVsSham.m` and reads its `BehData` / centroid data) | outputs of 4 | `Analysis_M1subsample_vsS1/` (`results.mat`, figure, `summary.md`) |
+| 5. Robustness check of the M1 vs S1 comparison (Fig. 2): exhaustive subsampling of the M1 group down to the size of the S1 group (all 92,378 subsets of 9 of the 19 M1 animals in the revised manuscript) | `Analysis_M1subsample_vsS1.m` (runs `LeverPullTask_InfVsSham.m` and reads its `BehData` / centroid data) | outputs of 4 | `Analysis_M1subsample_vsS1/` (`results.mat`, figure, `summary.md`) |
 
 Dorsal-view region masks used for the pixel-wise map are in `AllenCCF/` (`MOp_topview_mask.mat`, `Region_topview_masks.mat`); `AP_histology-master/AllenMapTopView.m` regenerates them from the atlas.
 
@@ -36,6 +72,10 @@ python GenerateFallCount.py <animal_folder>
 ## Data
 
 Processed data needed to reproduce the figures (per-session `*_FallCount.mat`, per-animal `LesionMapAllenCCF.mat`, `InfarctionShamIDdata.mat`, the animal summary spreadsheet) and representative raw examples will be deposited on Zenodo on publication. Full raw videos and section images are available from the corresponding author on reasonable request.
+
+## Related repository: lesion-ccf-registration
+
+The histology part of this pipeline (steps 2 and 3: the AP_histology GUI with lesion annotation, the dorsal projection, the per-animal viewer with the section-by-section display and the 3D lesion movie) is also maintained as a standalone repository, [lesion-ccf-registration](https://github.com/hironobu-osaki/lesion-ccf-registration), which does not depend on the behavioral data. This repository keeps the version used for the paper. To reuse the registration step in another project, or to use only part of this pipeline, start from lesion-ccf-registration; new work on registration happens there and may be brought back here by reference rather than by copying.
 
 ## Third-party code
 
