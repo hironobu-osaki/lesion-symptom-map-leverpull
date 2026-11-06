@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Package the two Zenodo records as zip files (stored, no recompression).
 record1: one zip per animal + _shared.zip; README.md, manifest.csv, SHA256SUMS.txt kept as loose files.
+A zip is rebuilt when any file under its folder is newer than the zip (re-run after refreshing the bundle).
 record2: one zip per top-level folder (videos, dlc_tracking, dlc_model, behavior); README.md loose."""
 import os, zipfile, hashlib, shutil, time
 H = os.path.expanduser("~/ZenodoUpload")
@@ -10,9 +11,14 @@ U1 = os.path.join(H, "upload", "record1_processed_data")
 U2 = os.path.join(H, "upload", "record2_example_NO57")
 t0 = time.time()
 def log(m): print(f"[{time.time()-t0:6.0f}s] {m}", flush=True)
+def newest_mtime(d):
+    return max((os.path.getmtime(os.path.join(r, f)) for r, _, fs in os.walk(d) for f in fs), default=0)
 def zipdir(src_dir, dst_zip, arc_root):
-    if os.path.exists(dst_zip):
+    # rebuild when the zip is missing or any source file is newer than the zip
+    if os.path.exists(dst_zip) and os.path.getmtime(dst_zip) >= newest_mtime(src_dir):
         return
+    if os.path.exists(dst_zip):
+        log(f"{os.path.basename(dst_zip)}: source changed, rebuilding")
     tmp = dst_zip + ".part"
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
         for root, _, files in os.walk(src_dir):

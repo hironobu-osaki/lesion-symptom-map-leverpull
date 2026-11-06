@@ -19,7 +19,9 @@ Rules (decided for the 2026 Neuroscience Research submission):
   * animals without a histology folder are sham; SHAM_OVERRIDE lists sham
     animals whose spreadsheet row carries a lesion label.
   * animal IDs may be zero-padded on disk (IO8 -> IO08); both spellings are tried.
-  * the run is resumable: existing files with matching size are skipped.
+  * the run is resumable: existing files with matching size and mtime are skipped.
+  * DUAL_LESION lists animals that are in the data but excluded from every
+    computation by Read_NOIO_summary.m (second lesion); manifest.csv marks them.
 
 Usage:
   python3 make_zenodo_bundle.py [--share /Volumes/DataTransferForAllUsers_1day]
@@ -30,6 +32,7 @@ import argparse, csv, glob, gzip, hashlib, os, re, shutil, sys, time
 
 CCF_KEEP = ("histology_ccf.mat", "atlas2histology_tform.mat", "lesion_ccf.mat", "LesionMapAllenCCF.mat")
 SHAM_OVERRIDE = {"IO22", "IO41"}          # sham animals (no lesion mapping) despite a spreadsheet label
+DUAL_LESION = {"NO1", "NO19", "IO7"}       # deposited, but excluded from the analysis (Read_NOIO_summary.m)
 SKIP_DIR_TOKENS = ("新しいフォルダー",)     # duplicate working copies, never used by the analysis
 RESEARCHER_DIRS = ("Iwai", "Nakashima", "Watanabe")   # where Behavior/<researcher>/<animal>/*.lvm may live
 
@@ -71,7 +74,11 @@ def find_behavior_dir(share, animal):
     return None
 
 def copy(src, dst, dry, log):
-    if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src):
+    # same size and same modification time (copy2 preserves it) -> already up to date;
+    # a file re-saved on the server (e.g. a corrections.mat changed during the revision)
+    # is copied again even when its size did not change
+    if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src) \
+            and abs(os.path.getmtime(dst) - os.path.getmtime(src)) < 2:
         return os.path.getsize(dst)
     log(f"  copy {os.path.basename(src)}")
     if not dry:
@@ -127,6 +134,7 @@ def main():
     for animal, info in animals.items():
         log(f"{animal} ({info['location']})")
         rec = {"animal": animal, "group": "sham" if (animal in SHAM_OVERRIDE or info["location"].lower() == "sham") else "infarction",
+               "analysis": "excluded (dual lesion)" if animal in DUAL_LESION else "included",
                "lesion_location": info["location"], "lesion_size_mm3": info["lesion_size_mm3"],
                "n_slices": 0, "n_ccf_mat": 0, "n_fallcount": 0, "n_corrections": 0, "n_lvm": 0, "bytes": 0}
         adir = os.path.join(out, "data", animal)
@@ -186,7 +194,7 @@ def main():
     tot = sum(r["bytes"] for r in rows)
     log(f"done: {len(rows)} animals, {tot/1e9:.2f} GB in per-animal folders")
     for r in rows:
-        log(f"  {r['animal']:6s} {r['group']:10s} slices={r['n_slices']:3d} ccf={r['n_ccf_mat']} fallcount={r['n_fallcount']:2d} corr={r['n_corrections']:2d} lvm={r['n_lvm']:2d} {r['bytes']/1e9:5.2f} GB")
+        log(f"  {r['animal']:6s} {r['group']:10s} {r['analysis'][:8]:8s} slices={r['n_slices']:3d} ccf={r['n_ccf_mat']} fallcount={r['n_fallcount']:2d} corr={r['n_corrections']:2d} lvm={r['n_lvm']:2d} {r['bytes']/1e9:5.2f} GB")
 
     if not dry and not a.no_checksums:
         log("computing SHA-256 checksums")

@@ -23,6 +23,15 @@ The pipeline quantifies right-forelimb behavior in a lever-pull task after photo
 <p align="center"><img src="docs/images/map-all.gif" width="880" alt="Lesion-symptom maps for fall time, fall count and the composite score, changing together from the acute to the sub-acute and the chronic phase"></p>
 <p align="center"><sub>Lesion-symptom maps over recovery. Each map fades from the acute (POD 3–7) to the sub-acute (POD 10–24) and the chronic (POD 28) phase; colour: fraction of the lesions covering a pixel that came from the more-affected half of the cohort (pixels covered by at least two lesions; black cross: bregma). The territory in which most covering lesions came from the more-affected half (red) contracts as the animals recover, while the region most associated with the deficit stays at the M1/S1 border.</sub></p>
 
+<details>
+<summary>The three maps one by one</summary>
+<p align="center">
+<img src="docs/images/map-falltime.gif" width="280" alt="Fall time map, acute to chronic">&nbsp;
+<img src="docs/images/map-fallcount.gif" width="280" alt="Fall count map, acute to chronic">&nbsp;
+<img src="docs/images/map-composite.gif" width="280" alt="Composite score map, acute to chronic">
+</p>
+</details>
+
 ## How it works
 
 ```mermaid
@@ -38,7 +47,7 @@ flowchart LR
     M --> R[Analysis_M1subsample_vsS1.m<br>robustness check]
 ```
 
-Steps 1 and 2 need the raw videos and section images; steps 3 to 5 run from the processed data that will be deposited on Zenodo (see [Data](#data)). All figures in this README come from the pipeline outputs.
+Steps 1 and 2 need the raw videos and section images; steps 3 to 5 run from the processed data deposited on Zenodo (see [Data](#data)). All figures in this README come from the pipeline outputs.
 
 ## Pipeline
 
@@ -71,7 +80,12 @@ python GenerateFallCount.py <animal_folder>
 
 ## Data
 
-Processed data needed to reproduce the figures (per-session `*_FallCount.mat`, per-animal `LesionMapAllenCCF.mat`, `InfarctionShamIDdata.mat`, the animal summary spreadsheet) and representative raw examples will be deposited on Zenodo on publication. Full raw videos and section images are available from the corresponding author on reasonable request.
+The data are deposited on Zenodo (CC BY 4.0) in two records:
+
+* **Processed data**, <https://doi.org/10.5281/zenodo.23939516>: for 50 animals (38 single-infarction and 9 sham animals used in the paper, plus 3 dual-lesion animals excluded from the analysis), the per-session `*_FallCount.mat` with their `_corrections.mat`, the per-animal `LesionMapAllenCCF.mat` with the registered DAPI sections, `InfarctionShamIDdata.mat` and the animal summary spreadsheet. One zip per animal; this is all that steps 3 to 5 need.
+* **Representative raw example (animal NO57)**, <https://doi.org/10.5281/zenodo.23971145>: the raw videos of a pre-infarction session and of post-operative day 3, the DeepLabCut tracking output of all 13 sessions, the trained DeepLabCut model and the resulting metrics, so that steps 1 and 4 can be run end to end on real data.
+
+Full raw videos and section images of the other animals are available from the corresponding author on reasonable request.
 
 ## Related repository: lesion-ccf-registration
 
